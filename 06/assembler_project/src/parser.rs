@@ -1,9 +1,8 @@
-extern crate queues;
 
-use queues::Queue;
-use self::queues::IsQueue;
+use std::fmt;
+use std::fmt::Formatter;
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum CommandType {
     A,
     C,
@@ -11,52 +10,44 @@ pub enum CommandType {
 }
 
 pub enum NewParserError {
-    ErrorOpeningFile,
-    ErrorReadingFile,
-    FileEmpty,
-    AdvanceError(AdvanceError),
+    LinesEmpty,
 }
 
-#[derive(Debug)]
-pub enum ParseError {
-    CommandType,
-    SymbolStartsWithDigit,
+impl fmt::Display for NewParserError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
 }
-
 pub enum AdvanceError {
     NoMoreCommands,
-    ParseError(ParseError),
 }
 
 pub struct Parser {
-    lines : Queue<String>,
+    lines : Vec<String>,
+    line_index : usize,
 }
 
 impl Parser {
     pub fn new(lines : &Vec<String>) -> Result<Parser, NewParserError> {
         if lines.len() > 0 {
             let mut p = Parser {
-                lines: Queue::new(),
+                lines : Vec::new(),
+                line_index : 0,
             };
             for line in lines {
-                if p.lines.add(String::from(line)).is_err() {
-                    return Err(NewParserError::ErrorReadingFile);
-                }
+                p.lines.push(String::from(line));
             }
             return Ok(p);
         }
-        Err(NewParserError::FileEmpty)
+        Err(NewParserError::LinesEmpty)
     }
 
     pub fn has_more_commands(&self) -> bool {
-        self.lines.size() > 1
+        self.line_index < self.lines.len() - 1
     }
 
-    fn get_command_type_from_line(line : &str) -> Result<CommandType, ParseError> {
+    fn get_command_type_from_line(line : &str) -> Result<CommandType, ()> {
         if line.starts_with('@') {
-            if line.chars().next().unwrap().is_digit(10){
-                return Err(ParseError::SymbolStartsWithDigit);
-            }
             return Ok(CommandType::A);
         }
         if line.contains('=') || line.contains(';') {
@@ -121,14 +112,12 @@ impl Parser {
         if !self.has_more_commands() {
             return Err(AdvanceError::NoMoreCommands);
         }
-        if self.lines.remove().is_err() {
-            return Err(AdvanceError::NoMoreCommands);
-        }
+        self.line_index += 1;
         Ok(())
     }
 
     pub fn command_type(&self) -> Option<CommandType> {
-        if let Ok(line) = self.lines.peek() {
+        if let Some(line) = self.lines.get(self.line_index) {
             if let Ok(command_type) = Parser::get_command_type_from_line(line.as_ref()) {
                 return Some(command_type);
             }
@@ -137,7 +126,7 @@ impl Parser {
     }
 
     pub fn symbol(&self) -> Option<String> {
-        if let Ok(line) = self.lines.peek() {
+        if let Some(line) = self.lines.get(self.line_index) {
             if let Ok(symbol) = Parser::get_symbol_from_line(&self.command_type().unwrap(), line.as_ref()) {
                 return Some(symbol);
             }
@@ -146,7 +135,7 @@ impl Parser {
     }
 
     pub fn dest(&self) -> Option<String> {
-        if let Ok(line) = self.lines.peek() {
+        if let Some(line) = self.lines.get(self.line_index) {
             if let Ok(dest) = Parser::get_dest_from_line(&self.command_type().unwrap(), line.as_ref()) {
                 return Some(dest);
             }
@@ -155,7 +144,7 @@ impl Parser {
     }
 
     pub fn comp(&self) -> Option<String> {
-        if let Ok(line) = self.lines.peek() {
+        if let Some(line) = self.lines.get(self.line_index) {
             if let Ok(comp) = Parser::get_comp_from_line(&self.command_type().unwrap(), line.as_ref()) {
                 return Some(comp);
             }
@@ -164,12 +153,16 @@ impl Parser {
     }
 
     pub fn jump(&self) -> Option<String> {
-        if let Ok(line) = self.lines.peek() {
+        if let Some(line) = self.lines.get(self.line_index) {
             if let Ok(jump) = Parser::get_jump_from_line(&self.command_type().unwrap(), line.as_ref()) {
                 return Some(jump);
             }
         }
         None
+    }
+
+    pub fn reset(&mut self) {
+        self.line_index = 0;
     }
 }
 
@@ -210,22 +203,33 @@ mod tests {
         let lines = vec!["@i".to_string()];
         let p = Parser::new(&lines).ok().unwrap();
         assert!(p.command_type().is_some());
-        assert!(p.command_type().unwrap() == CommandType::A);
+        assert_eq!(p.command_type().unwrap(), CommandType::A);
+
+        let lines = vec!["@INFINITE_LOOP".to_string()];
+        let p = Parser::new(&lines).ok().unwrap();
+        assert!(p.command_type().is_some());
+        assert_eq!(p.command_type().unwrap(), CommandType::A);
+
+
+        let lines = vec!["@12".to_string()];
+        let p = Parser::new(&lines).ok().unwrap();
+        assert!(p.command_type().is_some());
+        assert_eq!(p.command_type().unwrap(), CommandType::A);
 
         let lines = vec!["M=1".to_string()];
         let p = Parser::new(&lines).ok().unwrap();
         assert!(p.command_type().is_some());
-        assert!(p.command_type().unwrap() == CommandType::C);
+        assert_eq!(p.command_type().unwrap(), CommandType::C);
 
         let lines = vec!["0;JMP".to_string()];
         let p = Parser::new(&lines).ok().unwrap();
         assert!(p.command_type().is_some());
-        assert!(p.command_type().unwrap() == CommandType::C);
+        assert_eq!(p.command_type().unwrap(), CommandType::C);
 
         let lines = vec!["(LOOP)".to_string()];
         let p = Parser::new(&lines).ok().unwrap();
         assert!(p.command_type().is_some());
-        assert!(p.command_type().unwrap() == CommandType::L);
+        assert_eq!(p.command_type().unwrap(), CommandType::L);
     }
 
     #[test]
@@ -234,6 +238,11 @@ mod tests {
         let p = Parser::new(&lines).ok().unwrap();
         assert!(p.symbol().is_some());
         assert_eq!(p.symbol().unwrap(), "i".parse::<String>().unwrap());
+
+        let lines = vec!["@INFINITE_LOOP".to_string()];
+        let p = Parser::new(&lines).ok().unwrap();
+        assert!(p.symbol().is_some());
+        assert_eq!(p.symbol().unwrap(), "INFINITE_LOOP".parse::<String>().unwrap());
 
         let lines = vec!["M=1".to_string()];
         let p = Parser::new(&lines).ok().unwrap();
@@ -333,5 +342,16 @@ mod tests {
         let lines = vec!["(LOOP)".to_string()];
         let p = Parser::new(&lines).ok().unwrap();
         assert!(p.jump().is_none());
+    }
+
+    #[test]
+    fn reset_test() {
+        let lines = vec!["@i".to_string(), "M=1".to_string()];
+        let mut p = Parser::new(&lines).ok().unwrap();
+        assert!(p.advance().is_ok());
+        assert!(p.advance().is_err());
+        p.reset();
+        assert!(p.advance().is_ok());
+        assert!(p.advance().is_err());
     }
 }
