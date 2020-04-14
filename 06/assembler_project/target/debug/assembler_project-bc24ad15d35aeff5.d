@@ -1,0 +1,1 @@
+D:\Projects\nand2tetris\projects\06\assembler_project\target\debug\assembler_project-bc24ad15d35aeff5.exe: D:\Projects\nand2tetris\projects\06\assembler_project\src\main.rs D:\Projects\nand2tetris\projects\06\assembler_project\src\parser.rs
